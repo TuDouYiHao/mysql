@@ -1,0 +1,104 @@
+MySQL数据库迁移
+
+实验环境：
+        原数据库：centos7 ip:192.168.171.137
+        新数据库：centos7 ip:192.168.171.138
+        数据库版本：MySQL5.5.62
+        LNMP架构，未实际安装
+
+1 数据库迁移具体步骤：
+        1）停止监控
+        2）停止应用服务apache和MySQL
+        # systemctl stop apache
+        # systemctl stop mysql
+
+2 新环境部署安装MySQL：
+        1）官网下载安装MySQL
+        2）安装要求：
+                  安装目录basedir:/usr/local/mysql
+                  数据库目录datadir:/usr/local/mysql/data
+                  端口：3307
+                  socket文件：/usr/local/mysql/mysql.sock
+                  错误日志：/usr/local/mysql/data/mysql3307.err
+
+3 glibc方式安装步骤：
+        1）创建目录并解压软件包：
+                  [root@localhost ~]# mkdir /usr/local/mysql
+                  [root@localhost ~]# tar -xzvf mysql-5.5.62-linux-glibc2.12-x86_64.tar.gz
+                  [root@localhost ~]# mv mysql-5.5.62-linux-glibc2.12-x86_64/* /usr/local/mysql/  
+        2）创建用户并修改用户目录权限：
+                  （1）查看用户是否存在;
+                             [root@localhost ~]# id mysql
+                             id: mysql: no such user
+                   (2) 添加用户：
+                             [root@localhost ~]# useradd -r -s /sbin/login mysql 
+                   (3) 更改MySQL安装目录权限                 
+                             [root@localhost ~]# chown -R mysql:mysql /usr/local/mysql
+                             [root@localhost ~]# ll -d /usr/local/mysql
+                             drwxr-xr-x. 13 mysql mysql 213 Nov 18 14:43 /usr/local/mysql
+                   (4) 修改配置文件：
+                             [root@localhost ~]# vim /etc/my.cnf
+                             [mysqld]
+                             basedir=/usr/local/mysql
+                             datadir=/usr/local/mysql/data
+                             port=3307
+                             socket=/usr/local/mysql/mysql.sock
+                             log_error=/usr/local/mysql/data/mysql.3307.error
+                   (4) 拷贝启动脚本：
+                             [root@localhost mysql]# pwd
+                             /usr/local/mysql 
+                             [root@localhost mysql]# cp support-files/mysql.server  /etc/init.d/mysql
+                   (5) 初始化说明：
+                             1 正常安装新数据库直接使用，是需要初始化数据库然后再启动使用
+                             2 当前需求是将原来MySQL数据库文件迁移到新的数据库的数据目录里，故不需要初始化
+
+4 迁移数据库到新环境（新数据库服务器上操作）
+        1）同步旧数据库文件到新数据库目录：  
+                   [root@localhost mysql]# rsync -av 192.168.171.137:/usr/local/mysql/data/ /usr/local/mysql/data/
+                   root@192.168.171.137's password: 
+                   ##注意：使用rsync命令时，两台机器必须能够使用rsync命令，如果没有则安装：[root@localhost ~]# yum -y install rsync
+                   ##注意：192.168.171.137为旧数据库服务器IP
+        2）直接启动新数据库，并检查日志文件：    
+                   [root@localhost mysql]# systemctl start mysql   
+                   [root@localhost mysql]# mysql
+                   -bash: mysql: command not found
+                   ##  系统默认会查找/usr/bin/下的命令，如果这个命令不在这个目录下，会找不到的，我们需要做的是映射一个连接到/usr/bin目录下，相当于建立一个连接文件，首先需要知道MySQL命令的绝对路径：/usr/local/mysql/bin/mysql然后执行命令 ：[root@localhost mysql]# ln -s  /usr/local/mysql/bin/mysql    /usr/bin
+                   [root@localhost mysql]# mysql
+                   ERROR 2002 (HY000): Can't connect to local MySQL server through socket '/tmp/mysql.sock' (2)
+                   [root@localhost mysql]# mysql -S /usr/local/mysql/mysql.sock -p
+                   Enter password:--输入旧数据库密码
+        3）升级数据库：
+                    使用mysql_upgrade命令检查数据库文件的兼容性：
+                            [root@localhost mysql]# ./bin/mysql_upgrade -p
+                            Enter password: 
+                            ## 在实际的环境中，建议使用 -s 参数，不检查业务表，只检查系统文件，如果上述文件命令执行失败，则允许命令：
+                            [root@localhost ~]#/usr/local/mysql/bin/mysql_upgrade -s /usr/local/mysql/mysql.sock
+                            ## 此实验的数据库版本都为同一种，升级是不会成功的。
+
+5 原web服务器重新连接数据库
+        1）修改PHP连接MySQL的配置文件：## 在旧数据库服务器上操作
+                   [root@localhost ~]#find / -name php.ini
+                   [root@localhost ~]#vim /usr/local/lib/php.ini
+                   [mysql]                            
+                   mysql.default_port=3307
+                   mysql.default_host=192.168.171.138 --新数据库所在服务器IP
+                   [mysqli]
+                   mysql.default_port=3307
+                   mysql.default_host=192.168.171.138 --新数据库所在服务器IP
+        2) 修改网站配置文件连接数据库
+                   [root@localhost ~]#vim wp-config.php
+                   definr ('DB_USER','root');
+                   define ('DB_PASSWORD','123456');
+                   define ('DB_HOST','新数据所在服务器IP');         
+                   define ('DB_CHARSET','UTF-8');
+        3) 更新数据库为web数据库：
+                   新的MySQL需要给root@原IP用户授权 ---在新数据库上操作
+                   mysql>grant all on *.* to 'root'@'192.168.171.138' identified by '123456';
+                   mysql>flush privileges;
+        4) 启动web服务：
+                   [root@localhost ~]#systemctl start appache
+                   [root@localhost ~]#netstat -ntlp |grep httpd                      
+
+
+
+                             

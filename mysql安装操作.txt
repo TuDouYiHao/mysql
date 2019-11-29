@@ -1,0 +1,53 @@
+一 安装MySQL
+1 创建安装目录和用户
+[root@localhost ~]# useradd mysql -r -s /sbin/nologin
+[root@localhost ~]# mkdir /usr/local/mysql
+
+2 下载相应的软件包并解压
+shell不支持rz上传文件，需要先安装：yum -y install lrzsz
+上传安装包：[root@localhost ~]# rz
+解压：[root@localhost ~]# tar -xvf mysql-5.5.62-linux-glibc2.12-x86_64.tar.gz 
+进入到解压目录拷贝数据文件到安装目录：
+[root@localhost ~]# cd mysql-5.5.62-linux-glibc2.12-x86_64
+[root@localhost mysql-5.5.62-linux-glibc2.12-x86_64]# cp -a ./* /usr/local/mysql/
+将数据文件拷贝到MySQL安装路径后，说明MySQL数据库安装已经完成
+
+3 手动初始化数据库
+进入MySQL安装目录：[root@localhost /]# cd /usr/local/mysql/
+更改安装目录权限:[root@localhost mysql]# chown -R mysql:mysql /usr/local/mysql/
+初始化数据库，注意，确保当前系统没有/etc/my.cnf文件：
+[root@localhost mysql]# rm -rf /etc/my.cnf
+[root@localhost mysql]# scripts/mysql_install_db --user=mysql：执行此命令显示两个🆗表示成功
+
+4 验证
+[root@localhost mysql]# ls /usr/local/mysql/data/
+mysql  performance_schema  test
+
+5 启动数据库
+[root@localhost mysql]# cp support-files/mysql.server /etc/init.d/mysql
+[root@localhost mysql]# service mysql start
+Starting MySQL.Logging to '/usr/local/mysql/data/localhost.localdomain.err'.
+. SUCCESS! 
+[root@localhost mysql]# ss -natlp | grep mysqld
+LISTEN     0      50           *:3306                     *:*                   users:(("mysqld",pid=7679,fd=10))
+
+
+5 后续配置
+更改数据库管理员密码：
+[root@localhost mysql]# ./bin/mysqladmin -uroot password
+New password: 
+Confirm new password: 
+安全初始化数据库：[root@localhost mysql]# ./bin/mysqladmin -uroot password'123456'
+Enter current password for root (enter for none):输入root登录数据库的密码
+Change the root password? [Y/n] :是否要更改root密码
+Remove anonymous users? [Y/n]：是否删除其他用户
+Disallow root login remotely? [Y/n]:是否远程登录
+Remove test database and access to it? [Y/n]：移除测试的数据库
+Reload privilege tables now? [Y/n] ：刷新
+
+6 配置环境变量及测试登录
+[root@localhost mysql]# vi /etc/profile
+在最后一行写入：export PATH=$PATH:/usr/local/mysql/bin，保存退出
+[root@localhost mysql]# source /etc/profile--使环境变量配置生效
+[root@localhost mysql]# mysql -uroot -p
+Enter password:

@@ -1,0 +1,146 @@
+1 mondodb的安装--社区版
+       1）导入包管理系统使用的公钥。
+       wget -qO - https://www.mongodb.org/static/pgp/server-4.2.asc | sudo apt-key add -
+       该操作以响应OK
+
+       2）/etc/apt/sources.list.d/mongodb-enterprise.list为MongoDB 创建文件
+       ubuntu 18.04:
+       echo "deb [ arch=amd64 ] https://repo.mongodb.org/apt/ubuntu bionic/mongodb-org/4.2 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-4.2.list
+       ubuntu 16.04:
+       echo "deb [ arch=amd64 ] https://repo.mongodb.org/apt/ubuntu xenial/mongodb-org/4.2 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-4.2.list
+
+       3）重新加载本地包数据：
+       sudo apt-get update
+       当报错：
+       E: Could not get lock /var/lib/apt/lists/lock - open (11: Resource temporarily unavailable)
+       E: Unable to lock directory /var/lib/apt/lists/
+       解决方法:
+       sudo rm /var/cache/apt/archives/lock
+       sudo rm /var/lib/dpkg/lock
+
+       
+
+       4）安装mongodb软件包并开启查看：
+       sudo apt-get install -y mongodb-org
+       sudo service mongod start
+       sudo service mongod status
+       sudo service mongod restart
+       sudo service mongod stop
+
+       5）删除mongdb：
+       sudo apt-get purge mongodb-org*  --删除以前安装的所有mongodb软件包
+       sudo rm -r /var/log/mongodb  --删除mongodb日志文件
+       sudo rm -r /var/lib/mongodb  --删除mongodb数据库
+
+
+
+复制集实验配置： 
+       1）说明：主库IP为192.168.171.141，从库IP为192.168.171.142，mongodb端口都为27017
+
+       2）主库配置：
+                  主库添加以下内容： 
+                        replication:
+                            replSetName: rs1
+                  更改以下内容：
+                        net:
+                           port: 27017
+                           bindIp: 0.0.0.0    
+       3）从库服务器为支持多实例备份多份不同源数据库。新建实例配置以及数据存储目录。
+                   sudo mkdir -pv /mnt/work/bkmongod/{data,run,log}
+                   data: 为数据库数据存储目录
+                   run: mongodb实例运行pid存放目录
+                   log: mongodb运行日志存储目录                                      
+
+                   修改配置文件，添加以下内容：
+                   storage:
+                     dbPath: /mnt/work/bkmongod/data
+                     journal:
+                       enabled: true
+                   
+                   systemLog:
+                     destination: file
+                     logAppend: true
+                     path: /mnt/work/bkmongod/log/mongod.log
+
+
+                   net:
+                     port: 27017
+                     bindIp: 0.0.0.0
+
+                   processManagement:
+                     #fork: true --此项为后台运行，实验中开启此项，实例无法启动（找到原因后再修改）
+                     pidFilePath: /mnt/work/bkmongod/run/mongod.pid
+                     timeZoneInfo: /usr/share/zoneinfo
+
+                   replication:
+                     replSetName: rs1
+
+        4）重启主库：
+                先将依赖于主库的程序服务暂停，并登录主库执行数据输入磁盘和锁库。
+                use admin
+                db.runCommand({"fsync":1,"lock":1});
+                sudo service mongod restart
+                从库：sudo service mongod restart
+
+        5）操作主库mongodb添加副本集，并解锁。
+                mongod --port 27017
+                >use admin
+                >var cfg={_id:'rs1',members:[{_id:0,host:'172.168.171.141:27017'},{_id:1,host:'172.3168.171.142:27017',priority:0,votes:0}]}
+                >rs.initiate(cfg)
+                >rs.status()
+                >db.fsyncUnlock();
+                说明：priority:0,votes:0,避免主从切换，不参与主从库选举
+
+        6）查看日志，检查复制执行情况
+                sudo tail -f /mnt/work/bkmongod/log/mongod.log
+
+        7）查看副本集复制延迟状态
+                在主下执行：
+                        rs1:PRIMARY> db.printReplicationInfo()
+                        configured oplog size:   990MB
+                        log length start to end: 3652secs (1.01hrs)
+                        oplog first event time:  Tue Nov 26 2019 08:16:12 GMT+0000 (UTC)
+                        oplog last event time:   Tue Nov 26 2019 09:17:04 GMT+0000 (UTC)
+                        now:                     Tue Nov 26 2019 09:17:09 GMT+0000 (UTC)
+
+                在从下执行：
+                        rs1:SECONDARY> db.printSlaveReplicationInfo()
+                        source: 192.168.171.142:27017
+	                    syncedTo: Tue Nov 26 2019 09:19:04 GMT+0000 (UTC)
+	                    -13 secs (0 hrs) behind the primary     
+	                    延迟于主库的时间变成0，则复制完成。此时显示的时间是 -13
+
+        8）检查主从库是否一致，分别在主从库上执行该命令，查看返回是否一致。
+                主库：
+                rs1:PRIMARY> use dbname
+                switched to db dbname
+                查看集合条数
+                rs1:PRIMARY> db.collection.count()
+                0
+                查看集合状态：
+
+                rs1:PRIMARY> db.collection.stats()
+{
+	"ns" : "dbname.collection",
+	"size" : 0,
+	"count" : 0,
+	"storageSize" : 0,
+	"nindexes" : 0,
+	"totalIndexSize" : 0,
+	"indexSizes" : {
+		
+	},
+	"scaleFactor" : 1,
+	"ok" : 1,
+	"$clusterTime" : {
+		"clusterTime" : Timestamp(1574760394, 1),
+		"signature" : {
+			"hash" : BinData(0,"AAAAAAAAAAAAAAAAAAAAAAAAAAA="),
+			"keyId" : NumberLong(0)
+		}
+	},
+	"operationTime" : Timestamp(1574760394, 1)
+}
+
+                从库：
+                    
